@@ -17,11 +17,11 @@ export default class MyPlugin extends Plugin {
 					// If checking is true, we're simply "checking" if the command can be run.
 					// If checking is false, then we want to actually perform the operation.
 					if (!checking) {
-						const content = markdownView.getViewData();
-						const tables = parseMarkdownTables(content);
-						new SampleSuggestModal(this.app, tables, (item: string) => {
-							handleTableSelection(markdownView, tables, item);
-						}).open();
+						this.getAllMarkdownTables().then(tables => {
+							new SampleSuggestModal(this.app, tables, (item: string) => {
+								handleTableSelection(markdownView, tables, item);
+							}).open();
+						});
 					}
 
 					// This command will only show up in Command Palette when the check function returns true
@@ -29,6 +29,19 @@ export default class MyPlugin extends Plugin {
 				}
 			}
 		});
+	}
+
+	async getAllMarkdownTables(): Promise<Map<string, MarkdownTable>> {
+		const files = this.app.vault.getMarkdownFiles();
+		const tables = new Map<string, MarkdownTable>();
+
+		for (const file of files) {
+			const content = await this.app.vault.read(file);
+			const fileTables = parseMarkdownTables(content, file.path);
+			fileTables.forEach((table, name) => tables.set(name, table));
+		}
+
+		return tables;
 	}
 
 	onunload() {
@@ -87,8 +100,8 @@ class MarkdownTable {
 }
 
 // Function to parse markdown tables
-function parseMarkdownTables(text: string): Map<string, MarkdownTable> {
-	console.log('Parsing markdown tables.');
+function parseMarkdownTables(text: string, filePath: string): Map<string, MarkdownTable> {
+	console.log(`Parsing markdown tables in file: ${filePath}`);
 	const tableRegex = /(^\|.*\|$\n^\|(?:[-:| ]+)\|$(?:\n^\|.*\|$)+)/gm;
 	const tables = new Map<string, MarkdownTable>();
 	let match;
@@ -123,10 +136,16 @@ function parseMarkdownTables(text: string): Map<string, MarkdownTable> {
 		});
 
 		table.rows = rows;
-		tables.set(table.name, table);
-		console.log('Added a table to the map.');
+
+		// Only add the table if it has a header and its roll and name are not blank or empty strings
+		if (table.hasHeader && table.roll && table.name) {
+			tables.set(`${filePath} - ${table.name}`, table);
+			console.log('Added a table to the map.');
+		} else {
+			console.log('Table not added due to missing header, roll, or name.');
+		}
 	}
-	console.log(`Parsed ${tables.size} tables.`);
+	console.log(`Parsed ${tables.size} tables in file: ${filePath}`);
 	return tables;
 }
 

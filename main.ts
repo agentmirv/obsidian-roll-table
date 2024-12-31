@@ -1,50 +1,11 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, MarkdownView, Notice, Plugin, SuggestModal } from 'obsidian';
+import { DiceRoller } from '@dice-roller/rpg-dice-roller';
 
 // Remember to rename these classes and interfaces!
 
-interface MyPluginSettings {
-	mySetting: string;
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
-
 export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
 
 	async onload() {
-		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
 		// This adds a complex command that can check whether the current state of the app allows execution of the command
 		this.addCommand({
 			id: 'open-sample-modal-complex',
@@ -56,7 +17,11 @@ export default class MyPlugin extends Plugin {
 					// If checking is true, we're simply "checking" if the command can be run.
 					// If checking is false, then we want to actually perform the operation.
 					if (!checking) {
-						new SampleModal(this.app).open();
+						const content = markdownView.getViewData();
+						const tables = parseMarkdownTables(content);
+						new SampleSuggestModal(this.app, tables, (item: string) => {
+							handleTableSelection(markdownView, tables, item);
+						}).open();
 					}
 
 					// This command will only show up in Command Palette when the check function returns true
@@ -64,71 +29,167 @@ export default class MyPlugin extends Plugin {
 				}
 			}
 		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
 	}
 
 	onunload() {
 
 	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
+class SampleSuggestModal extends SuggestModal<string> {
+	private tableNames: string[];
+	private tables: Map<string, MarkdownTable>;
+	private onChoose: (item: string) => void;
+
+	constructor(app: App, tables: Map<string, MarkdownTable>, onChoose: (item: string) => void) {
 		super(app);
+		this.tables = tables;
+		this.tableNames = Array.from(tables.keys());
+		this.onChoose = onChoose;
+		this.setPlaceholder('Select a table...');
 	}
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
+	getSuggestions(query: string): string[] {
+		// Return all suggestions that contain the query
+		return this.tableNames.filter(name => name.toLowerCase().includes(query.toLowerCase()));
 	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	renderSuggestion(value: string, el: HTMLElement) {
+		el.createEl('div', { text: value });
+	}
+
+	onChooseSuggestion(item: string, evt: MouseEvent | KeyboardEvent) {
+		this.onChoose(item);
 	}
 }
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+class MarkdownRow {
+	constructor(public cells: string[]) {}
 
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
+	get roll() {
+		return this.cells[0];
 	}
 
-	display(): void {
-		const {containerEl} = this;
+	get value() {
+		return this.cells[1];
+	}
+}
 
-		containerEl.empty();
+class MarkdownTable {
+	public roll = '';
+	public name = '';
+	public hasHeader = false;
+	public rows: MarkdownRow[];
 
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+	constructor(rows: MarkdownRow[]) {
+		this.rows = rows;
+	}
+}
+
+// Function to parse markdown tables
+function parseMarkdownTables(text: string): Map<string, MarkdownTable> {
+	console.log('Parsing markdown tables.');
+	const tableRegex = /(^\|.*\|$\n^\|(?:[-:| ]+)\|$(?:\n^\|.*\|$)+)/gm;
+	const tables = new Map<string, MarkdownTable>();
+	let match;
+
+	while ((match = tableRegex.exec(text)) !== null) {
+		console.log('Found a table match.');
+
+		const tableText = match[0];
+		const rowTexts = tableText.trim().split('\n');
+		const headerSeparatorRegex = /^\|\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)*\|$/;
+		let rows: MarkdownRow[] = [];
+		const table = new MarkdownTable(rows);
+
+		// Check if the table has a header row
+		if (rowTexts.length > 1 && rowTexts[1].trim().match(headerSeparatorRegex)) {
+			console.log('Table has a header row.');
+			console.log(`Header row match: ${rowTexts[0]}`);
+			const headerRow = new MarkdownRow(rowTexts[0].trim().split('|').slice(1, -1).map(cellText => cellText.trim()));
+			table.roll = headerRow.roll; // Use the roll getter
+			table.name = headerRow.value; // Use the value getter
+			table.hasHeader = true;
+			rowTexts.splice(0, 2); // Remove header row and separator row
+		} else {
+			console.log('Table does not have a header row.');
+		}
+
+		// Process the remaining rows
+		rows = rowTexts.map(rowText => {
+			console.log(`Row match: ${rowText}`);
+			const cells = rowText.trim().split('|').slice(1, -1).map(cellText => cellText.trim());
+			return new MarkdownRow(cells);
+		});
+
+		table.rows = rows;
+		tables.set(table.name, table);
+		console.log('Added a table to the map.');
+	}
+	console.log(`Parsed ${tables.size} tables.`);
+	return tables;
+}
+
+function generateOutcomeString(selectedTable: MarkdownTable): string | null {
+	const tableName = selectedTable.name;
+	console.log(`Selected table name: ${tableName}`);
+
+	// Generate a random die value based on the roll column header
+	const tableRoll = selectedTable.roll; // Use the roll property
+	const diceRoller = new DiceRoller();
+	const rollResult = diceRoller.roll(tableRoll);
+	const diceRoll = Array.isArray(rollResult) ? rollResult[0].total : rollResult.total;
+	console.log(`Random die value: ${diceRoll}`);
+
+	// Set dieValues to the values of the first column
+	const outcomeRolls = selectedTable.rows.map(row => row.roll); // Use the roll getter
+	console.log(`Die values: ${outcomeRolls}`);
+
+	let dieIndex = -1;
+	for (let i = 0; i < outcomeRolls.length; i++) {
+		const value = outcomeRolls[i];
+		if (value.includes('-')) {
+			const [min, max] = value.split('-').map(Number);
+			if (diceRoll >= min && diceRoll <= max) {
+				dieIndex = i;
+				break;
+			}
+		} else if (parseInt(value) === diceRoll) {
+			dieIndex = i;
+			break;
+		}
+	}
+
+	if (dieIndex === -1) {
+		console.log('No matching die value found.');
+		return null;
+	}
+
+	console.log(`Die index: ${dieIndex}`);
+	const outcomeRow = selectedTable.rows[dieIndex];
+	const outcome = outcomeRow.value; // Use the value getter
+	console.log(`Outcome: ${outcome}`);
+
+	const outcomeString = `${tableName}\n${tableRoll}: ${diceRoll}\n${outcome}\n`;
+	return outcomeString;
+}
+
+function handleTableSelection(markdownView: MarkdownView, tables: Map<string, MarkdownTable>, item: string) {
+	const selectTable = tables.get(item);
+	if (selectTable) {
+		const outcomeString = generateOutcomeString(selectTable);
+		if (outcomeString) {
+			const cursor = markdownView.editor.getCursor();
+			markdownView.editor.replaceRange(outcomeString, cursor);
+			const newCursor = {
+				line: cursor.line + outcomeString.split('\n').length - 1,
+				ch: outcomeString.split('\n').pop()?.length || 0
+			};
+			markdownView.editor.setCursor(newCursor);
+		} else {
+			new Notice('No matching die value found.');
+		}
+	} else {
+		new Notice('No table selected.');
 	}
 }

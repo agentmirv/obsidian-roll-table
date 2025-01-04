@@ -1,5 +1,5 @@
 import { App, MarkdownView, Notice, Plugin, SuggestModal } from 'obsidian';
-import { DiceRoller } from '@dice-roller/rpg-dice-roller';
+import { DiceRoller, Parser } from '@dice-roller/rpg-dice-roller';
 
 // Remember to rename these classes and interfaces!
 
@@ -8,8 +8,8 @@ export default class MyPlugin extends Plugin {
 	async onload() {
 		// This adds a complex command that can check whether the current state of the app allows execution of the command
 		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
+			id: 'roll-table',
+			name: 'Roll Table',
 			checkCallback: (checking: boolean) => {
 				// Conditions to check
 				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -91,7 +91,7 @@ class MarkdownRow {
 class MarkdownTable {
 	public roll = '';
 	public name = '';
-	public hasHeader = false;
+	public isValid = false;
 	public rows: MarkdownRow[];
 
 	constructor(rows: MarkdownRow[]) {
@@ -122,7 +122,12 @@ function parseMarkdownTables(text: string, filePath: string): Map<string, Markdo
 			const headerRow = new MarkdownRow(rowTexts[0].trim().split('|').slice(1, -1).map(cellText => cellText.trim()));
 			table.roll = headerRow.roll; // Use the roll getter
 			table.name = headerRow.value; // Use the value getter
-			table.hasHeader = true;
+			try {
+				Parser.parse(table.roll);
+				table.isValid = true;
+			} catch (error) {
+				table.isValid = false;
+			}
 			rowTexts.splice(0, 2); // Remove header row and separator row
 		} else {
 			console.log('Table does not have a header row.');
@@ -138,7 +143,7 @@ function parseMarkdownTables(text: string, filePath: string): Map<string, Markdo
 		table.rows = rows;
 
 		// Only add the table if it has a header and its roll and name are not blank or empty strings
-		if (table.hasHeader && table.roll && table.name) {
+		if (table.isValid && table.roll && table.name) {
 			tables.set(`${filePath} - ${table.name}`, table);
 			console.log('Added a table to the map.');
 		} else {

@@ -62,13 +62,33 @@ class SampleSuggestModal extends SuggestModal<string> {
 		this.setPlaceholder('Select a table...');
 	}
 
+	private parseInternalLink(text: string): { file: string; heading: string } | null {
+		// Match [[file#heading]] or [[file#heading|display name]]
+		const match = text.match(/^\[\[([^#\]]+)#([^|\]]+)(?:\|[^\]]+)?\]\]$/);
+		if (match) {
+			return {
+				file: match[1],
+				heading: match[2]
+			};
+		}
+		return null;
+	}
+
 	getSuggestions(query: string): string[] {
 		// Return all suggestions that contain the query
 		return this.tableNames.filter(name => name.toLowerCase().includes(query.toLowerCase()));
 	}
 
 	renderSuggestion(value: string, el: HTMLElement) {
-		el.createEl('div', { text: value });
+		const linkInfo = this.parseInternalLink(value);
+		if (linkInfo) {
+			el.createEl('div', { 
+				text: `${linkInfo.file} > ${linkInfo.heading}`,
+				cls: 'suggestion-internal-link'
+			});
+		} else {
+			el.createEl('div', { text: value });
+		}
 	}
 
 	onChooseSuggestion(item: string, evt: MouseEvent | KeyboardEvent) {

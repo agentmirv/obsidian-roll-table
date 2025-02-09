@@ -86,6 +86,10 @@ class MarkdownRow {
 	get value() {
 		return this.cells[1];
 	}
+
+	get nextTable() {
+		return this.cells[2] || '';
+	}
 }
 
 class MarkdownTable {
@@ -97,6 +101,12 @@ class MarkdownTable {
 	constructor(rows: MarkdownRow[]) {
 		this.rows = rows;
 	}
+}
+
+class Outcome {
+	public name = '';
+	public diceRoll = '';
+	public Row: MarkdownRow;
 }
 
 // Function to parse markdown tables
@@ -144,8 +154,12 @@ function parseMarkdownTables(text: string, filePath: string): Map<string, Markdo
 
 		// Only add the table if it has a header and its roll and name are not blank or empty strings
 		if (table.isValid && table.roll && table.name) {
-			tables.set(`${filePath} - ${table.name}`, table);
-			console.log('Added a table to the map.');
+			if (tables.has(table.name)) {
+				console.log(`Table with name ${table.name} already exists. Skipping.`);
+			} else {
+				tables.set(table.name, table);
+				console.log('Added a table to the map.');
+			}
 		} else {
 			console.log('Table not added due to missing header, roll, or name.');
 		}
@@ -154,65 +168,91 @@ function parseMarkdownTables(text: string, filePath: string): Map<string, Markdo
 	return tables;
 }
 
-function generateOutcomeString(selectedTable: MarkdownTable): string | null {
-	const tableName = selectedTable.name;
-	console.log(`Selected table name: ${tableName}`);
-
-	// Generate a random die value based on the roll column header
-	const tableRoll = selectedTable.roll; // Use the roll property
+// Renamed and refactored function: returns an Outcome instance populated with table data
+function getOutcome(table: MarkdownTable): Outcome | null {
+	const tableRoll = table.roll;
 	const diceRoller = new DiceRoller();
 	const rollResult = diceRoller.roll(tableRoll);
 	const diceRoll = Array.isArray(rollResult) ? rollResult[0].total : rollResult.total;
-	console.log(`Random die value: ${diceRoll}`);
 
-	// Set dieValues to the values of the first column
-	const outcomeRolls = selectedTable.rows.map(row => row.roll); // Use the roll getter
-	console.log(`Die values: ${outcomeRolls}`);
-
-	let dieIndex = -1;
-	for (let i = 0; i < outcomeRolls.length; i++) {
-		const value = outcomeRolls[i];
+	const outcomeRolls = table.rows.map(row => row.roll);
+	
+	let dieIndex = outcomeRolls.findIndex(value => {
 		if (value.includes('-')) {
 			const [min, max] = value.split('-').map(Number);
-			if (diceRoll >= min && diceRoll <= max) {
-				dieIndex = i;
-				break;
-			}
-		} else if (parseInt(value) === diceRoll) {
-			dieIndex = i;
-			break;
+			return diceRoll >= min && diceRoll <= max;
 		}
-	}
+		return parseInt(value) === diceRoll;
+	});
 
 	if (dieIndex === -1) {
-		console.log('No matching die value found.');
 		return null;
 	}
 
-	console.log(`Die index: ${dieIndex}`);
-	const outcomeRow = selectedTable.rows[dieIndex];
-	const outcome = outcomeRow.value; // Use the value getter
-	console.log(`Outcome: ${outcome}`);
+	const outcomeRow = table.rows[dieIndex];
+	const outcome = new Outcome();
+	outcome.name = table.name;
+	outcome.diceRoll = diceRoll.toString();
+	outcome.Row = outcomeRow;
+	return outcome;
+}
 
-	const outcomeString = `${tableName}\n${tableRoll}: ${diceRoll}\n${outcome}\n`;
+function generateOutcomeString(outcome: Outcome): string {
+	const tableName = outcome.name;
+	console.log(`Selected table name: ${tableName}`);
+
+	const tableRoll = outcome.diceRoll;
+	console.log(`Random die value: ${tableRoll}`);
+
+	const outcomeString = `${tableName}: ${tableRoll}\n${outcome.Row.value}: ${outcome.Row.roll}\n\n`;
 	return outcomeString;
 }
 
 function handleTableSelection(markdownView: MarkdownView, tables: Map<string, MarkdownTable>, item: string) {
-	const selectTable = tables.get(item);
-	if (selectTable) {
-		const outcomeString = generateOutcomeString(selectTable);
-		if (outcomeString) {
-			const cursor = markdownView.editor.getCursor();
-			markdownView.editor.replaceRange(outcomeString, cursor);
-			const newCursor = {
-				line: cursor.line + outcomeString.split('\n').length - 1,
-				ch: outcomeString.split('\n').pop()?.length || 0
-			};
-			markdownView.editor.setCursor(newCursor);
+	let outcomeMap = new Map<string, Outcome>();
+	let nextTable = item;
+	let selectTable = tables.get(nextTable);
+	console.log(selectTable);
+	
+	while (selectTable) {
+		console.log(selectTable.name + ':' + selectTable.roll);
+		let outcome = getOutcome(selectTable);
+		if (outcome) {
+			outcomeMap.set(nextTable, outcome);
+			nextTable = outcome.Row.nextTable;
+			
+			if (!outcomeMap.has(nextTable)) {
+				console.log(nextTable);
+				selectTable = tables.get(nextTable);
+			} else {
+				break;
+			}
 		} else {
 			new Notice('No matching die value found.');
+			break;
 		}
+	}
+
+	let finalOutcomeString = '';
+	for (const outcome of outcomeMap.values()) {
+		console.log(outcome);
+		const outcomeString = generateOutcomeString(outcome);
+		if (outcomeString) {
+			finalOutcomeString += outcomeString;
+		} else {
+			new Notice('No matching die value found.');
+			return;
+		}
+	}
+
+	if (finalOutcomeString) {
+		const cursor = markdownView.editor.getCursor();
+		markdownView.editor.replaceRange(finalOutcomeString, cursor);
+		const newCursor = {
+			line: cursor.line + finalOutcomeString.split('\n').length - 1,
+			ch: finalOutcomeString.split('\n').pop()?.length || 0
+		};
+		markdownView.editor.setCursor(newCursor);
 	} else {
 		new Notice('No table selected.');
 	}

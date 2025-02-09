@@ -104,7 +104,8 @@ class MarkdownTable {
 }
 
 class Outcome {
-	public name = '';
+	public tableName = '';
+	public tableRoll = '';
 	public diceRoll = '';
 	public Row: MarkdownRow;
 }
@@ -191,20 +192,21 @@ function getOutcome(table: MarkdownTable): Outcome | null {
 
 	const outcomeRow = table.rows[dieIndex];
 	const outcome = new Outcome();
-	outcome.name = table.name;
+	outcome.tableName = table.name;
+	outcome.tableRoll = tableRoll;
 	outcome.diceRoll = diceRoll.toString();
 	outcome.Row = outcomeRow;
 	return outcome;
 }
 
 function generateOutcomeString(outcome: Outcome): string {
-	const tableName = outcome.name;
+	const tableName = outcome.tableName;
 	console.log(`Selected table name: ${tableName}`);
 
-	const tableRoll = outcome.diceRoll;
+	const tableRoll = outcome.tableRoll;
 	console.log(`Random die value: ${tableRoll}`);
 
-	const outcomeString = `${tableName}: ${tableRoll}\n${outcome.Row.value}: ${outcome.Row.roll}\n\n`;
+	const outcomeString = `${tableName}\n${tableRoll}: ${outcome.diceRoll}\n${outcome.Row.value}\n\n`;
 	return outcomeString;
 }
 

@@ -18,7 +18,7 @@ export default class MyPlugin extends Plugin {
 					// If checking is false, then we want to actually perform the operation.
 					if (!checking) {
 						this.getAllMarkdownTables().then(tables => {
-							new SampleSuggestModal(this.app, tables, (item: string) => {
+							new TableSuggestModal(this.app, tables, (item: string) => {
 								handleTableSelection(markdownView, tables, item);
 							}).open();
 						});
@@ -49,7 +49,7 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-class SampleSuggestModal extends SuggestModal<string> {
+class TableSuggestModal extends SuggestModal<string> {
 	private tableNames: string[];
 	private tables: Map<string, MarkdownTable>;
 	private onChoose: (item: string) => void;

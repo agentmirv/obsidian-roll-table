@@ -3,50 +3,59 @@ import { DiceRoller, Parser } from '@dice-roller/rpg-dice-roller';
 
 // Remember to rename these classes and interfaces!
 
-export default class MyPlugin extends Plugin {
+export default class RollTablePlugin extends Plugin {
+    async onload() {
+        this.addCommand({
+            id: 'roll-table',
+            name: 'Roll Table',
+            checkCallback: (checking: boolean) => {
+                const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+                
+                if (!activeMarkdownView) {
+                    return false;
+                }
 
-	async onload() {
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'roll-table',
-			name: 'Roll Table',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						this.getAllMarkdownTables().then(tables => {
-							new TableSuggestModal(this.app, tables, (item: string) => {
-								handleTableSelection(markdownView, tables, item);
-							}).open();
-						});
-					}
+                if (!checking) {
+                    this.handleRollTableCommand(activeMarkdownView);
+                }
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-	}
+                return true;
+            }
+        });
+    }
 
-	async getAllMarkdownTables(): Promise<Map<string, MarkdownTable>> {
-		const files = this.app.vault.getMarkdownFiles();
-		const tables = new Map<string, MarkdownTable>();
+    private async handleRollTableCommand(markdownView: MarkdownView): Promise<void> {
+        try {
+            const availableTables = await this.getAllMarkdownTables();
+            new TableSuggestModal(this.app, availableTables, (selectedTable: string) => {
+                handleTableSelection(markdownView, availableTables, selectedTable);
+            }).open();
+        } catch (error) {
+            console.error('Failed to process roll table command:', error);
+            new Notice('Failed to process roll table command');
+        }
+    }
 
-		for (const file of files) {
-			const content = await this.app.vault.read(file);
-			const fileTables = parseMarkdownTables(content, file.path);
-			fileTables.forEach((table, name) => tables.set(name, table));
-		}
+    async getAllMarkdownTables(): Promise<Map<string, MarkdownTable>> {
+        const markdownFiles = this.app.vault.getMarkdownFiles();
+        const allTables = new Map<string, MarkdownTable>();
 
-		return tables;
-	}
+        for (const file of markdownFiles) {
+            try {
+                const fileContent = await this.app.vault.read(file);
+                const tablesInFile = parseMarkdownTables(fileContent, file.path);
+                tablesInFile.forEach((table, tableName) => allTables.set(tableName, table));
+            } catch (error) {
+                console.error(`Failed to parse tables from ${file.path}:`, error);
+            }
+        }
 
-	onunload() {
+        return allTables;
+    }
 
-	}
+    onunload() {
+        // Cleanup if needed in the future
+    }
 }
 
 class TableSuggestModal extends SuggestModal<string> {
@@ -127,96 +136,104 @@ class Outcome {
 	public tableName = '';
 	public tableRoll = '';
 	public diceRoll = '';
-	public Row: MarkdownRow;
+	public row: MarkdownRow;
 }
 
 // Function to parse markdown tables
-function parseMarkdownTables(text: string, filePath: string): Map<string, MarkdownTable> {
-	console.log(`Parsing markdown tables in file: ${filePath}`);
-	const tableRegex = /(^\|.*\|$\n^\|(?:[-:| ]+)\|$(?:\n^\|.*\|$)+)/gm;
-	const tables = new Map<string, MarkdownTable>();
-	let match;
+function parseMarkdownTables(content: string, filePath: string): Map<string, MarkdownTable> {
+    const tables = new Map<string, MarkdownTable>();
+    const tablePattern = /(^\|.*\|$\n^\|(?:[-:| ]+)\|$(?:\n^\|.*\|$)+)/gm;
+    const headerSeparatorPattern = /^\|\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)*\|$/;
+    let tableMatch;
 
-	while ((match = tableRegex.exec(text)) !== null) {
-		console.log('Found a table match.');
+    while ((tableMatch = tablePattern.exec(content)) !== null) {
+        const tableText = tableMatch[0];
+        const tableLines = tableText.trim().split('\n');
+        
+        // Skip tables with less than 2 rows (need header + separator at minimum)
+        if (tableLines.length < 2) continue;
 
-		const tableText = match[0];
-		const rowTexts = tableText.trim().split('\n');
-		const headerSeparatorRegex = /^\|\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)*\|$/;
-		let rows: MarkdownRow[] = [];
-		const table = new MarkdownTable(rows);
+        const table = new MarkdownTable([]);
+        
+        // Validate table has proper header separator
+        if (!tableLines[1].trim().match(headerSeparatorPattern)) {
+            continue;
+        }
 
-		// Check if the table has a header row
-		if (rowTexts.length > 1 && rowTexts[1].trim().match(headerSeparatorRegex)) {
-			console.log('Table has a header row.');
-			console.log(`Header row match: ${rowTexts[0]}`);
-			const headerRow = new MarkdownRow(rowTexts[0].trim().split('|').slice(1, -1).map(cellText => cellText.trim()));
-			table.roll = headerRow.roll; // Use the roll getter
-			table.name = headerRow.value; // Use the value getter
-			try {
-				Parser.parse(table.roll);
-				table.isValid = true;
-			} catch (error) {
-				table.isValid = false;
-			}
-			rowTexts.splice(0, 2); // Remove header row and separator row
-		} else {
-			console.log('Table does not have a header row.');
-		}
+        // Parse header row
+        const headerCells = parseTableRow(tableLines[0]);
+        table.roll = headerCells[0];
+        table.name = headerCells[1];
 
-		// Process the remaining rows
-		rows = rowTexts.map(rowText => {
-			console.log(`Row match: ${rowText}`);
-			const cells = rowText.trim().split('|').slice(1, -1).map(cellText => cellText.trim());
-			return new MarkdownRow(cells);
-		});
+        // Validate table roll expression
+        try {
+            Parser.parse(table.roll);
+            table.isValid = true;
+        } catch (error) {
+            console.warn(`Invalid roll expression in table "${table.name}" in ${filePath}`);
+            continue;
+        }
 
-		table.rows = rows;
+        // Skip if table name or roll is empty
+        if (!table.roll || !table.name) {
+            continue;
+        }
 
-		// Only add the table if it has a header and its roll and name are not blank or empty strings
-		if (table.isValid && table.roll && table.name) {
-			if (tables.has(table.name)) {
-				console.log(`Table with name ${table.name} already exists. Skipping.`);
-			} else {
-				tables.set(table.name, table);
-				console.log('Added a table to the map.');
-			}
-		} else {
-			console.log('Table not added due to missing header, roll, or name.');
-		}
-	}
-	console.log(`Parsed ${tables.size} tables in file: ${filePath}`);
-	return tables;
+        // Parse content rows (skip header and separator)
+        table.rows = tableLines.slice(2).map(line => new MarkdownRow(parseTableRow(line)));
+
+        // Add table if not duplicate
+        if (!tables.has(table.name)) {
+            tables.set(table.name, table);
+        } else {
+            console.warn(`Duplicate table name "${table.name}" found in ${filePath}`);
+        }
+    }
+
+    console.log(`Parsed ${tables.size} valid tables from ${filePath}`);
+    return tables;
 }
 
-// Renamed and refactored function: returns an Outcome instance populated with table data
+// Helper function to parse table row cells
+function parseTableRow(rowText: string): string[] {
+    return rowText.trim()
+        .split('|')
+        .slice(1, -1)  // Remove first and last empty cells
+        .map(cell => cell.trim());
+}
+
 function getOutcome(table: MarkdownTable): Outcome | null {
-	const tableRoll = table.roll;
-	const diceRoller = new DiceRoller();
-	const rollResult = diceRoller.roll(tableRoll);
-	const diceRoll = Array.isArray(rollResult) ? rollResult[0].total : rollResult.total;
+    try {
+        const diceRoller = new DiceRoller();
+        const diceResult = diceRoller.roll(table.roll);
+        const rolledValue = Array.isArray(diceResult) ? diceResult[0].total : diceResult.total;
+        
+        console.debug(`Rolling ${table.roll} for table "${table.name}": got ${rolledValue}`);
 
-	const outcomeRolls = table.rows.map(row => row.roll);
-	
-	let dieIndex = outcomeRolls.findIndex(value => {
-		if (value.includes('-')) {
-			const [min, max] = value.split('-').map(Number);
-			return diceRoll >= min && diceRoll <= max;
-		}
-		return parseInt(value) === diceRoll;
-	});
+        const matchingRow = table.rows.find(row => {
+            const rollValue = row.roll;
+            if (rollValue.includes('-')) {
+                const [minValue, maxValue] = rollValue.split('-').map(Number);
+                return rolledValue >= minValue && rolledValue <= maxValue;
+            }
+            return parseInt(rollValue) === rolledValue;
+        });
 
-	if (dieIndex === -1) {
-		return null;
-	}
+        if (!matchingRow) {
+            console.warn(`No matching outcome found for roll ${rolledValue} in table "${table.name}"`);
+            return null;
+        }
 
-	const outcomeRow = table.rows[dieIndex];
-	const outcome = new Outcome();
-	outcome.tableName = table.name;
-	outcome.tableRoll = tableRoll;
-	outcome.diceRoll = diceRoll.toString();
-	outcome.Row = outcomeRow;
-	return outcome;
+        return {
+            tableName: table.name,
+            tableRoll: table.roll,
+            diceRoll: rolledValue.toString(),
+            row: matchingRow
+        };
+    } catch (error) {
+        console.error(`Error processing roll for table "${table.name}":`, error);
+        return null;
+    }
 }
 
 function generateOutcomeString(outcome: Outcome): string {
@@ -226,56 +243,60 @@ function generateOutcomeString(outcome: Outcome): string {
 	const tableRoll = outcome.tableRoll;
 	console.log(`Random die value: ${tableRoll}`);
 
-	const outcomeString = `${tableName}\n${tableRoll}: ${outcome.diceRoll}\n${outcome.Row.value}\n\n`;
+	const outcomeString = `${tableName}\n${tableRoll}: ${outcome.diceRoll}\n${outcome.row.value}\n\n`;
 	return outcomeString;
 }
 
-function handleTableSelection(markdownView: MarkdownView, tables: Map<string, MarkdownTable>, item: string) {
-	let outcomeMap = new Map<string, Outcome>();
-	let nextTable = item;
-	let selectTable = tables.get(nextTable);
-	console.log(selectTable);
-	
-	while (selectTable) {
-		console.log(selectTable.name + ':' + selectTable.roll);
-		let outcome = getOutcome(selectTable);
-		if (outcome) {
-			outcomeMap.set(nextTable, outcome);
-			nextTable = outcome.Row.nextTable;
-			
-			if (!outcomeMap.has(nextTable)) {
-				console.log(nextTable);
-				selectTable = tables.get(nextTable);
-			} else {
-				break;
-			}
-		} else {
-			new Notice('No matching die value found.');
-			break;
-		}
-	}
+function handleTableSelection(markdownView: MarkdownView, tables: Map<string, MarkdownTable>, selectedTableName: string) {
+    const outcomes = new Map<string, Outcome>();
+    let currentTableName = selectedTableName;
+    let currentTable = tables.get(currentTableName);
 
-	let finalOutcomeString = '';
-	for (const outcome of outcomeMap.values()) {
-		console.log(outcome);
-		const outcomeString = generateOutcomeString(outcome);
-		if (outcomeString) {
-			finalOutcomeString += outcomeString;
-		} else {
-			new Notice('No matching die value found.');
-			return;
-		}
-	}
+    // Process tables and collect outcomes
+    while (currentTable) {
+        console.log(`Processing table: ${currentTableName}`);
+        const outcome = getOutcome(currentTable);
+        
+        if (!outcome) {
+            new Notice('Failed to get outcome for table');
+            return;
+        }
 
-	if (finalOutcomeString) {
-		const cursor = markdownView.editor.getCursor();
-		markdownView.editor.replaceRange(finalOutcomeString, cursor);
-		const newCursor = {
-			line: cursor.line + finalOutcomeString.split('\n').length - 1,
-			ch: finalOutcomeString.split('\n').pop()?.length || 0
-		};
-		markdownView.editor.setCursor(newCursor);
-	} else {
-		new Notice('No table selected.');
-	}
+        outcomes.set(currentTableName, outcome);
+        currentTableName = outcome.row.nextTable;
+
+        // Break if we've already processed this table (prevent infinite loops)
+        if (outcomes.has(currentTableName)) {
+            break;
+        }
+
+        currentTable = tables.get(currentTableName);
+    }
+
+    // Generate final outcome text
+    let outcomeText = '';
+    for (const outcome of outcomes.values()) {
+        const outcomeString = generateOutcomeString(outcome);
+        if (!outcomeString) {
+            new Notice('Failed to generate outcome text');
+            return;
+        }
+        outcomeText += outcomeString;
+    }
+
+    if (!outcomeText) {
+        new Notice('No table selected.');
+        return;
+    }
+
+    // Insert text at cursor position
+    const cursor = markdownView.editor.getCursor();
+    markdownView.editor.replaceRange(outcomeText, cursor);
+    
+    // Update cursor position to end of inserted text
+    const newCursor = {
+        line: cursor.line + outcomeText.split('\n').length - 1,
+        ch: outcomeText.split('\n').pop()?.length || 0
+    };
+    markdownView.editor.setCursor(newCursor);
 }

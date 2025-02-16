@@ -237,13 +237,11 @@ function getOutcome(table: MarkdownTable): Outcome | null {
 }
 
 function generateOutcomeString(outcome: Outcome): string {
-	const tableName = outcome.tableName;
-	console.log(`Selected table name: ${tableName}`);
+	console.log(`Selected table name: ${outcome.tableName}`);
+	console.log(`Random die value: ${outcome.tableRoll}`);
 
-	const tableRoll = outcome.tableRoll;
-	console.log(`Random die value: ${tableRoll}`);
-
-	const outcomeString = `${tableName}\n${tableRoll}: ${outcome.diceRoll}\n${outcome.row.value}\n\n`;
+	const outcomeString = `${outcome.tableName}\n${outcome.tableRoll}: ${outcome.diceRoll}\n${outcome.row.value}\n\n`;
+    
 	return outcomeString;
 }
 

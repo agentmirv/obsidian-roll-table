@@ -143,6 +143,31 @@ class TableSuggestModal extends SuggestModal<string> {
 	}
 }
 
+class PlaceholderSuggestModal extends SuggestModal<IPlaceholderMarkdownRow> {
+    private rows: IPlaceholderMarkdownRow[];
+    private onChoose: (item: IPlaceholderMarkdownRow) => void;
+
+    constructor(app: App, placeholder: string, rows: IPlaceholderMarkdownRow[], onChoose: (item: IPlaceholderMarkdownRow) => void) {
+        super(app);
+        this.rows = rows;
+        this.onChoose = onChoose;
+        this.setPlaceholder(placeholder);
+    }
+
+    getSuggestions(query: string): IPlaceholderMarkdownRow[] {
+        return this.rows.filter(row => 
+            row.placeholder.toLowerCase().includes(query.toLowerCase()));
+    }
+
+    renderSuggestion(row: IPlaceholderMarkdownRow, el: HTMLElement) {
+        el.createEl('div', { text: row.placeholder });
+    }
+
+    onChooseSuggestion(row: IPlaceholderMarkdownRow, evt: MouseEvent | KeyboardEvent) {
+        this.onChoose(row);
+    }
+}
+
 class BaseMarkdownRow {
     constructor(public cells: string[]) {}
 
@@ -332,65 +357,91 @@ function generateOutcomeString(outcome: Outcome): string {
 	return outcomeString;
 }
 
-function handleTableSelection(markdownView: MarkdownView, tables: Map<string, IMarkdownTable>, selectedTableName: string) {
+async function handlePlaceholderTable(
+    table: IPlaceholderMarkdownTable, 
+    markdownView: MarkdownView
+): Promise<Outcome | null> {
+    return new Promise((resolve) => {
+        const placeholderRows = table.rows.filter(row => 
+            row.type === 'placeholder') as IPlaceholderMarkdownRow[];
+        
+        new PlaceholderSuggestModal(
+            markdownView.app,
+            table.placeholder,
+            placeholderRows,
+            (selectedRow) => {
+                const linkMatch = selectedRow.value.match(/^\[\[([^#\]]+)#([^|\]]+)(?:\|[^\]]+)?\]\]$/);
+                const outcome = new Outcome(
+                    table.name,
+                    '',
+                    '',
+                    selectedRow
+                );
+                resolve(outcome);
+            }
+        ).open();
+    });
+}
+
+async function processTable(
+    table: IMarkdownTable,
+    tableName: string,
+    markdownView: MarkdownView
+): Promise<Outcome | null> {
+    if (table.type === 'rolled') {
+        return getOutcome(table);
+    } else {
+        return handlePlaceholderTable(table, markdownView);
+    }
+}
+
+function insertOutcomeText(markdownView: MarkdownView, outcomeText: string) {
+    const cursor = markdownView.editor.getCursor();
+    markdownView.editor.replaceRange(outcomeText, cursor);
+    
+    const newCursor = {
+        line: cursor.line + outcomeText.split('\n').length - 1,
+        ch: outcomeText.split('\n').pop()?.length || 0
+    };
+    markdownView.editor.setCursor(newCursor);
+}
+
+async function handleTableSelection(
+    markdownView: MarkdownView, 
+    tables: Map<string, IMarkdownTable>, 
+    selectedTableName: string
+) {
     const outcomes = new Map<string, Outcome>();
     let currentTableName = selectedTableName;
     let currentTable = tables.get(currentTableName);
 
-    // Process tables and collect outcomes
     while (currentTable) {
         console.log(`Processing table: ${currentTableName}`);
         
-        let outcome: Outcome | null = null;
-        if (currentTable.type === 'rolled') {
-            outcome = getOutcome(currentTable);
-        } else {
-            // Placeholder tables will be handled differently
-            // TODO: Implement placeholder table outcome logic
-            new Notice('Placeholder table processing not yet implemented');
-            return;
-        }
-        
+        const outcome = await processTable(currentTable, currentTableName, markdownView);
         if (!outcome) {
             new Notice('Failed to get outcome for table');
             return;
         }
 
         outcomes.set(currentTableName, outcome);
+        
+        // Handle next table if it exists
         currentTableName = outcome.row.nextTable;
-
-        // Break if we've already processed this table (prevent infinite loops)
-        if (outcomes.has(currentTableName)) {
-            break;
-        }
-
+        if (outcomes.has(currentTableName)) break;
         currentTable = tables.get(currentTableName);
     }
 
-    // Generate final outcome text
-    let outcomeText = '';
-    for (const outcome of outcomes.values()) {
-        const outcomeString = generateOutcomeString(outcome);
-        if (!outcomeString) {
-            new Notice('Failed to generate outcome text');
-            return;
-        }
-        outcomeText += outcomeString;
-    }
+    // Generate and insert outcome text
+    const outcomeText = Array.from(outcomes.values())
+        .map(generateOutcomeString)
+        .filter(Boolean)
+        .join('');
 
     if (!outcomeText) {
         new Notice('No table selected.');
         return;
     }
 
-    // Insert text at cursor position
-    const cursor = markdownView.editor.getCursor();
-    markdownView.editor.replaceRange(outcomeText, cursor);
-    
-    // Update cursor position to end of inserted text
-    const newCursor = {
-        line: cursor.line + outcomeText.split('\n').length - 1,
-        ch: outcomeText.split('\n').pop()?.length || 0
-    };
-    markdownView.editor.setCursor(newCursor);
+    insertOutcomeText(markdownView, outcomeText);
 }

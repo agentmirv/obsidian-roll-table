@@ -1,6 +1,44 @@
 import { App, MarkdownView, Notice, Plugin, SuggestModal } from 'obsidian';
 import { DiceRoller, Parser } from '@dice-roller/rpg-dice-roller';
 
+// Insert interfaces after imports
+
+interface IBaseMarkdownRow {
+    cells: string[];
+    value: string;
+    nextTable: string;
+}
+
+interface IRolledMarkdownRow extends IBaseMarkdownRow {
+    type: 'rolled';
+    roll: string;
+}
+
+interface IPlaceholderMarkdownRow extends IBaseMarkdownRow {
+    type: 'placeholder';
+    placeholder: string;
+}
+
+type IMarkdownRow = IRolledMarkdownRow | IPlaceholderMarkdownRow;
+
+interface IBaseMarkdownTable {
+    name: string;
+    isValid: boolean;
+    rows: IMarkdownRow[];
+}
+
+interface IRolledMarkdownTable extends IBaseMarkdownTable {
+    type: 'rolled';
+    roll: string;
+}
+
+interface IPlaceholderMarkdownTable extends IBaseMarkdownTable {
+    type: 'placeholder';
+    placeholder: string;
+}
+
+type IMarkdownTable = IRolledMarkdownTable | IPlaceholderMarkdownTable;
+
 // Remember to rename these classes and interfaces!
 
 export default class RollTablePlugin extends Plugin {
@@ -36,9 +74,9 @@ export default class RollTablePlugin extends Plugin {
         }
     }
 
-    async getAllMarkdownTables(): Promise<Map<string, MarkdownTable>> {
+    async getAllMarkdownTables(): Promise<Map<string, IMarkdownTable>> {
         const markdownFiles = this.app.vault.getMarkdownFiles();
-        const allTables = new Map<string, MarkdownTable>();
+        const allTables = new Map<string, IMarkdownTable>();
 
         for (const file of markdownFiles) {
             try {
@@ -60,10 +98,10 @@ export default class RollTablePlugin extends Plugin {
 
 class TableSuggestModal extends SuggestModal<string> {
 	private tableNames: string[];
-	private tables: Map<string, MarkdownTable>;
+	private tables: Map<string, IMarkdownTable>;
 	private onChoose: (item: string) => void;
 
-	constructor(app: App, tables: Map<string, MarkdownTable>, onChoose: (item: string) => void) {
+	constructor(app: App, tables: Map<string, IMarkdownTable>, onChoose: (item: string) => void) {
 		super(app);
 		this.tables = tables;
 		this.tableNames = Array.from(tables.keys());
@@ -105,43 +143,102 @@ class TableSuggestModal extends SuggestModal<string> {
 	}
 }
 
-class MarkdownRow {
-	constructor(public cells: string[]) {}
+class BaseMarkdownRow {
+    constructor(public cells: string[]) {}
 
-	get roll() {
-		return this.cells[0];
-	}
+    get value() {
+        return this.cells[1];
+    }
 
-	get value() {
-		return this.cells[1];
-	}
-
-	get nextTable() {
-		return this.cells[2] || '';
-	}
+    get nextTable() {
+        return this.cells[2] || '';
+    }
 }
 
-class MarkdownTable {
-	public roll = '';
-	public name = '';
-	public isValid = false;
-	public rows: MarkdownRow[];
+class RolledMarkdownRow extends BaseMarkdownRow implements IRolledMarkdownRow {
+    public type: 'rolled' = 'rolled';
+    
+    constructor(cells: string[]) {
+        super(cells);
+    }
 
-	constructor(rows: MarkdownRow[]) {
-		this.rows = rows;
-	}
+    get roll(): string {
+        return this.cells[0];
+    }
+}
+
+class PlaceholderMarkdownRow extends BaseMarkdownRow implements IPlaceholderMarkdownRow {
+    public type: 'placeholder' = 'placeholder';
+    
+    constructor(cells: string[]) {
+        super(cells);
+    }
+
+    get placeholder(): string {
+        return this.cells[0];
+    }
+}
+
+class BaseMarkdownTable {
+    public name = '';
+    public isValid = false;
+    public rows: IMarkdownRow[] = [];
+
+    constructor(rows: IMarkdownRow[]) {
+        this.rows = rows;
+    }
+}
+
+class RolledMarkdownTable extends BaseMarkdownTable implements IRolledMarkdownTable {
+    public type: 'rolled' = 'rolled';
+    public roll: string;
+
+    constructor(rows: IMarkdownRow[], roll: string) {
+        super(rows);
+        this.roll = roll;
+    }
+}
+
+class PlaceholderMarkdownTable extends BaseMarkdownTable implements IPlaceholderMarkdownTable {
+    public type: 'placeholder' = 'placeholder';
+    public placeholder: string;
+
+    constructor(rows: IMarkdownRow[], placeholder: string) {
+        super(rows);
+        this.placeholder = placeholder;
+    }
+}
+
+function createMarkdownRow(cells: string[]): IMarkdownRow {
+    try {
+        Parser.parse(cells[0]);
+        return new RolledMarkdownRow(cells);
+    } catch {
+        return new PlaceholderMarkdownRow(cells);
+    }
+}
+
+function createMarkdownTable(rows: IMarkdownRow[], headerCells: string[]): IMarkdownTable {
+    try {
+        Parser.parse(headerCells[0]);
+        return new RolledMarkdownTable(rows, headerCells[0]);
+    } catch {
+        return new PlaceholderMarkdownTable(rows, headerCells[0]);
+    }
 }
 
 class Outcome {
-	public tableName = '';
-	public tableRoll = '';
-	public diceRoll = '';
-	public row: MarkdownRow;
+    constructor(
+        public tableName: string = '',
+        public tableRoll: string = '',
+        public diceRoll: string = '',
+        public row: IMarkdownRow
+    ) {}
 }
 
 // Function to parse markdown tables
-function parseMarkdownTables(content: string, filePath: string): Map<string, MarkdownTable> {
-    const tables = new Map<string, MarkdownTable>();
+function parseMarkdownTables(content: string, filePath: string): Map<string, IMarkdownTable> {
+    const tables = new Map<string, IMarkdownTable>();
     const tablePattern = /(^\|.*\|$\n^\|(?:[-:| ]+)\|$(?:\n^\|.*\|$)+)/gm;
     const headerSeparatorPattern = /^\|\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)*\|$/;
     let tableMatch;
@@ -150,37 +247,26 @@ function parseMarkdownTables(content: string, filePath: string): Map<string, Mar
         const tableText = tableMatch[0];
         const tableLines = tableText.trim().split('\n');
         
-        // Skip tables with less than 2 rows (need header + separator at minimum)
         if (tableLines.length < 2) continue;
-
-        const table = new MarkdownTable([]);
         
-        // Validate table has proper header separator
         if (!tableLines[1].trim().match(headerSeparatorPattern)) {
             continue;
         }
 
         // Parse header row
         const headerCells = parseTableRow(tableLines[0]);
-        table.roll = headerCells[0];
-        table.name = headerCells[1];
-
-        // Validate table roll expression
-        try {
-            Parser.parse(table.roll);
-            table.isValid = true;
-        } catch (error) {
-            console.warn(`Invalid roll expression in table "${table.name}" in ${filePath}`);
-            continue;
-        }
-
-        // Skip if table name or roll is empty
-        if (!table.roll || !table.name) {
+        
+        // Skip if table name or roll/placeholder is empty
+        if (!headerCells[0] || !headerCells[1]) {
             continue;
         }
 
         // Parse content rows (skip header and separator)
-        table.rows = tableLines.slice(2).map(line => new MarkdownRow(parseTableRow(line)));
+        const rows = tableLines.slice(2).map(line => createMarkdownRow(parseTableRow(line)));
+        
+        const table = createMarkdownTable(rows, headerCells);
+        table.name = headerCells[1];
+        table.isValid = true;
 
         // Add table if not duplicate
         if (!tables.has(table.name)) {
@@ -202,25 +288,26 @@ function parseTableRow(rowText: string): string[] {
         .map(cell => cell.trim());
 }
 
-function getOutcome(table: MarkdownTable): Outcome | null {
+function getOutcome(table: IRolledMarkdownTable): Outcome | null {
     try {
         const diceRoller = new DiceRoller();
         const diceResult = diceRoller.roll(table.roll);
         const rolledValue = Array.isArray(diceResult) ? diceResult[0].total : diceResult.total;
-        
         console.debug(`Rolling ${table.roll} for table "${table.name}": got ${rolledValue}`);
 
         const matchingRow = table.rows.find(row => {
-            const rollValue = row.roll;
-            if (rollValue.includes('-')) {
-                const [minValue, maxValue] = rollValue.split('-').map(Number);
-                return rolledValue >= minValue && rolledValue <= maxValue;
+            if (row.type === 'rolled') {
+                if (row.roll.includes('-')) {
+                    const [minValue, maxValue] = row.roll.split('-').map(Number);
+                    return rolledValue >= minValue && rolledValue <= maxValue;
+                }
+                return parseInt(row.roll) === rolledValue;
             }
-            return parseInt(rollValue) === rolledValue;
+            return false; // Skip placeholder rows in rolled tables
         });
 
         if (!matchingRow) {
-            console.warn(`No matching outcome found for roll ${rolledValue} in table "${table.name}"`);
+            console.warn(`No matching outcome found for value ${rolledValue} in table "${table.name}"`);
             return null;
         }
 
@@ -228,10 +315,10 @@ function getOutcome(table: MarkdownTable): Outcome | null {
             tableName: table.name,
             tableRoll: table.roll,
             diceRoll: rolledValue.toString(),
-            row: matchingRow
+            row: matchingRow as any // TODO: Update Outcome type to properly handle union types
         };
     } catch (error) {
-        console.error(`Error processing roll for table "${table.name}":`, error);
+        console.error(`Error processing table "${table.name}":`, error);
         return null;
     }
 }
@@ -245,7 +332,7 @@ function generateOutcomeString(outcome: Outcome): string {
 	return outcomeString;
 }
 
-function handleTableSelection(markdownView: MarkdownView, tables: Map<string, MarkdownTable>, selectedTableName: string) {
+function handleTableSelection(markdownView: MarkdownView, tables: Map<string, IMarkdownTable>, selectedTableName: string) {
     const outcomes = new Map<string, Outcome>();
     let currentTableName = selectedTableName;
     let currentTable = tables.get(currentTableName);
@@ -253,7 +340,16 @@ function handleTableSelection(markdownView: MarkdownView, tables: Map<string, Ma
     // Process tables and collect outcomes
     while (currentTable) {
         console.log(`Processing table: ${currentTableName}`);
-        const outcome = getOutcome(currentTable);
+        
+        let outcome: Outcome | null = null;
+        if (currentTable.type === 'rolled') {
+            outcome = getOutcome(currentTable);
+        } else {
+            // Placeholder tables will be handled differently
+            // TODO: Implement placeholder table outcome logic
+            new Notice('Placeholder table processing not yet implemented');
+            return;
+        }
         
         if (!outcome) {
             new Notice('Failed to get outcome for table');

@@ -1,15 +1,13 @@
 import { App, SuggestModal } from 'obsidian';
 import { IMarkdownTable, IPlaceholderMarkdownRow } from './interfaces';
 
-export class TableSuggestModal extends SuggestModal<string> {
-	private tableNames: string[];
+export class TableSuggestModal extends SuggestModal<IMarkdownTable> {
 	private tables: Map<string, IMarkdownTable>;
-	private onChoose: (item: string) => void;
+	private onChoose: (item: IMarkdownTable) => void;
 
-	constructor(app: App, tables: Map<string, IMarkdownTable>, onChoose: (item: string) => void) {
+	constructor(app: App, tables: Map<string, IMarkdownTable>, onChoose: (item: IMarkdownTable) => void) {
 		super(app);
 		this.tables = tables;
-		this.tableNames = Array.from(tables.keys());
 		this.onChoose = onChoose;
 		this.setPlaceholder('Select a table...');
 	}
@@ -25,24 +23,32 @@ export class TableSuggestModal extends SuggestModal<string> {
 		return null;
 	}
 
-	getSuggestions(query: string): string[] {
-		return this.tableNames.filter(name => name.toLowerCase().includes(query.toLowerCase()));
+	getSuggestions(query: string): IMarkdownTable[] {
+		return Array.from(this.tables.values()).filter(table => 
+			table.name.toLowerCase().includes(query.toLowerCase()));
 	}
 
-	renderSuggestion(value: string, el: HTMLElement) {
-		const linkInfo = this.parseInternalLink(value);
+	renderSuggestion(table: IMarkdownTable, el: HTMLElement) {
+		const linkInfo = this.parseInternalLink(table.name);
 		if (linkInfo) {
 			el.createEl('div', { 
 				text: `${linkInfo.file} > ${linkInfo.heading}`,
 				cls: 'suggestion-internal-link'
 			});
 		} else {
-			el.createEl('div', { text: value });
+			el.createEl('div', { text: table.name });
+		}
+
+		// Add additional table info
+		if (table.type === 'rolled') {
+			el.createEl('small', { text: `Roll: ${table.roll}` });
+		} else if (table.type === 'placeholder') {
+			el.createEl('small', { text: `Select: ${table.placeholder}` });
 		}
 	}
 
-	onChooseSuggestion(item: string, evt: MouseEvent | KeyboardEvent) {
-		this.onChoose(item);
+	onChooseSuggestion(table: IMarkdownTable, evt: MouseEvent | KeyboardEvent) {
+		this.onChoose(table);
 	}
 }
 

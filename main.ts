@@ -11,7 +11,7 @@ export default class RollTablePlugin extends Plugin {
             name: 'Roll Table',
             checkCallback: (checking: boolean) => {
                 const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                
+
                 if (!activeMarkdownView) {
                     return false;
                 }
@@ -28,8 +28,8 @@ export default class RollTablePlugin extends Plugin {
     private async handleRollTableCommand(markdownView: MarkdownView): Promise<void> {
         try {
             const availableTables = await this.getAllMarkdownTables();
-            new TableSuggestModal(this.app, availableTables, (selectedTable: string) => {
-                handleTableSelection(markdownView, availableTables, selectedTable);
+            new TableSuggestModal(this.app, availableTables, (selectedTable: IMarkdownTable) => {
+                handleTableSelection(markdownView, availableTables, selectedTable.name);
             }).open();
         } catch (error) {
             console.error('Failed to process roll table command:', error);

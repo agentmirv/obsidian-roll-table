@@ -94,9 +94,11 @@ export function getOutcome(table: IRolledMarkdownTable): Outcome | null {
 }
 
 export function generateOutcomeString(outcome: Outcome): string {
-    console.log(`Selected table name: ${outcome.tableName}`);
-    console.log(`Random die value: ${outcome.tableRoll}`);
-
+    if (!outcome.tableRoll && !outcome.diceRoll) {
+        // This is a placeholder table outcome
+        return outcome.row.value.trim() ? `${outcome.row.value}\n\n` : '';
+    }
+    // This is a rolled table outcome
     return `${outcome.tableName}\n${outcome.tableRoll}: ${outcome.diceRoll}\n${outcome.row.value}\n\n`;
 }
 

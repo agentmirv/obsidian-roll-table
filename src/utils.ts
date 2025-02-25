@@ -34,9 +34,17 @@ export function parseMarkdownTables(content: string, filePath: string): Map<stri
             continue;
         }
 
-        const rows = tableLines.slice(2).map(line => createMarkdownRow(parseTableRow(line)));
+        let isRolledTable = false;
+        try {
+            Parser.parse(headerCells[0]);
+            isRolledTable = true;
+        } catch {
+            isRolledTable = false;
+        }
+
+        const rows = tableLines.slice(2).map(line => createMarkdownRow(parseTableRow(line), isRolledTable));
         
-        const table = createMarkdownTable(rows, headerCells);
+        const table = createMarkdownTable(rows, headerCells, isRolledTable);
         table.name = headerCells[1];
         table.isValid = true;
 

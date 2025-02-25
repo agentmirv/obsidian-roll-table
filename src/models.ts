@@ -63,20 +63,16 @@ export class PlaceholderMarkdownTable extends BaseMarkdownTable implements IPlac
     }
 }
 
-export function createMarkdownRow(cells: string[]): IMarkdownRow {
-    try {
-        Parser.parse(cells[0]);
+export function createMarkdownRow(cells: string[], isRolledTable: boolean): IMarkdownRow {
+    if (isRolledTable) {
         return new RolledMarkdownRow(cells);
-    } catch {
-        return new PlaceholderMarkdownRow(cells);
     }
+    return new PlaceholderMarkdownRow(cells);
 }
 
-export function createMarkdownTable(rows: IMarkdownRow[], headerCells: string[]): IMarkdownTable {
-    try {
-        Parser.parse(headerCells[0]);
+export function createMarkdownTable(rows: IMarkdownRow[], headerCells: string[], isRolledTable: boolean): IMarkdownTable {
+    if (isRolledTable) {
         return new RolledMarkdownTable(rows, headerCells[0]);
-    } catch {
-        return new PlaceholderMarkdownTable(rows, headerCells[0]);
     }
+    return new PlaceholderMarkdownTable(rows, headerCells[0]);
 }

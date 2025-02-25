@@ -65,7 +65,8 @@ export class PlaceholderSuggestModal extends SuggestModal<IPlaceholderMarkdownRo
 
     getSuggestions(query: string): IPlaceholderMarkdownRow[] {
         return this.rows.filter(row => 
-            row.placeholder.toLowerCase().includes(query.toLowerCase()));
+            row.placeholder.toLowerCase().includes(query.toLowerCase())
+        );
     }
 
     renderSuggestion(row: IPlaceholderMarkdownRow, el: HTMLElement) {

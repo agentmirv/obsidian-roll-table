@@ -12,7 +12,21 @@ export class Outcome {
     ) {}
 }
 
-export function parseMarkdownTables(content: string, filePath: string): Map<string, IMarkdownTable> {
+// New function to check if a string is a valid dice roll expression
+export function isValidDiceRoll(expression: string, parser: any = Parser): boolean {
+    try {
+        parser.parse(expression);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export function parseMarkdownTables(
+    content: string, 
+    filePath: string,
+    diceParser: any = Parser
+): Map<string, IMarkdownTable> {
     const tables = new Map<string, IMarkdownTable>();
     const tablePattern = /(^\|.*\|$\n^\|(?:[-:| ]+)\|$(?:\n^\|.*\|$)+)/gm;
     const headerSeparatorPattern = /^\|\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)*\|$/;
@@ -34,13 +48,7 @@ export function parseMarkdownTables(content: string, filePath: string): Map<stri
             continue;
         }
 
-        let isRolledTable = false;
-        try {
-            Parser.parse(headerCells[0]);
-            isRolledTable = true;
-        } catch {
-            isRolledTable = false;
-        }
+        let isRolledTable = isValidDiceRoll(headerCells[0], diceParser);
 
         const rows = tableLines.slice(2).map(line => createMarkdownRow(parseTableRow(line), isRolledTable));
         

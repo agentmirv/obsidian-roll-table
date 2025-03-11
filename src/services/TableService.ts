@@ -1,5 +1,5 @@
-import { App } from 'obsidian';
-import { IMarkdownTable } from '../interfaces';
+import { App, TFile } from 'obsidian';
+import { IMarkdownTable } from '../models/IMarkdownTable';
 import { parseMarkdownTables } from '../utils';
 
 export class TableService {

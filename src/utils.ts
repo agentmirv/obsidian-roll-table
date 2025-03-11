@@ -1,7 +1,11 @@
 import { DiceRoller, Parser } from '@dice-roller/rpg-dice-roller';
 import { MarkdownView } from 'obsidian';
-import { IMarkdownRow, IMarkdownTable, IRolledMarkdownTable, IPlaceholderMarkdownTable } from './interfaces';
-import { createMarkdownRow, createMarkdownTable } from './models';
+import { IMarkdownRow } from './models/IMarkdownRow';
+import { IMarkdownTable } from './models/IMarkdownTable';
+import { IRolledMarkdownTable } from './models/IRolledMarkdownTable';
+import { MarkdownTableService } from './services/MarkdownTableService';
+
+const markdownTableService = new MarkdownTableService();
 
 export class Outcome {
     constructor(
@@ -49,10 +53,11 @@ export function parseMarkdownTables(
         }
 
         let isRolledTable = isValidDiceRoll(headerCells[0], diceParser);
-
-        const rows = tableLines.slice(2).map(line => createMarkdownRow(parseTableRow(line), isRolledTable));
+        const rows = tableLines.slice(2).map(line => 
+            markdownTableService.createMarkdownRow(parseTableRow(line), isRolledTable)
+        );
         
-        const table = createMarkdownTable(rows, headerCells, isRolledTable);
+        const table = markdownTableService.createMarkdownTable(rows, headerCells, isRolledTable);
         table.name = headerCells[1];
         table.isValid = true;
 
